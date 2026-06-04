@@ -1,4 +1,4 @@
-# Script-for-Install-3x-ui-Nginx-certbot
+# One Script for Install 3x-ui+Nginx+certbot
 Скрипт полностью автоматизирует установку панели 3X-UI, накатывает официальный Nginx, выбивает SSL-сертификаты и маскирует весь сервер под интерфейс авторизации Cosmos Cloud.
 
 🛠 1. Подготовка перед запуском
