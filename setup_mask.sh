@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
-# AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v6.4.2)
-# 3X-UI + Nginx Mask (Pure CosmosCloud Style - No PHP - Full Frontend restored)
-# Official Nginx.org Repo Integration
+# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v6.9.4-Noble-Armbian-Universal)
+# Highly Configurable Nginx Stream L4 Router & Mask for 3X-UI / Xray
 #
 
-set -uo pipefail
+set -euo pipefail
 
 # ─────────────────────────── Цвета ───────────────────────────
 GREEN='\033[0;32m'
@@ -19,11 +18,10 @@ ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
 
-# Перехват непредвиденных ошибок Bash
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}AutoSetup: Nginx Official Repo + Cosmos Mask v6.4.2${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v6.9.4 (Production Setup)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -31,65 +29,47 @@ if [ "$EUID" -ne 0 ]; then
   die "Пожалуйста, запустите скрипт от имени root (через sudo)."
 fi
 
-# Проверка обязательных системных утилит
-for cmd in curl bash systemctl ss openssl awk lsb_release gpg; do
-    command -v "$cmd" >/dev/null 2>&1 || die "Не найдена обязательная утилита: $cmd"
+# Проверка и установка утилит с правильным маппингом пакетов APT
+log "Проверка системных утилит..."
+declare -A pkg_map=(
+    [curl]="curl"
+    [bash]="bash"
+    [systemctl]="systemd"
+    [openssl]="openssl"
+    [awk]="gawk"
+    [lsb_release]="lsb-release"
+    [gpg]="gnupg2"
+    [dig]="dnsutils"
+)
+
+apt_updated=0
+for cmd in "${!pkg_map[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        warn "Не найдена утилита: $cmd. Устанавливаем пакет ${pkg_map[$cmd]}..."
+        if [ "$apt_updated" -eq 0 ]; then
+            apt-get update -q
+            apt_updated=1
+        fi
+        apt-get install -y "${pkg_map[$cmd]}" -q
+    fi
 done
 
-# Функция проверки доступности порта
-check_port_free() {
-    local port="$1"
-    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
-        return 1
-    fi
-    return 0
+# Функция для интерактивного ввода со значениями по умолчанию
+prompt_default() {
+    local prompt_text="$1"
+    local default_val="$2"
+    local var_name="$3"
+    local input_val
+    read -rp "$prompt_text [$default_val]: " input_val
+    declare -g "$var_name=${input_val:-$default_val}"
 }
 
 # ═════════════════════════════════════════════════════════════
-# 1. УСТАНОВКА / ОБНОВЛЕНИЕ ПАНЕЛИ 3X-UI
+#  ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ С ВЫБОРОМ
 # ═════════════════════════════════════════════════════════════
 echo
-read -rp "Хотите установить/обновить панель 3X-UI прямо сейчас? [Y/n]: " INSTALL_3XUI
-INSTALL_3XUI=${INSTALL_3XUI:-y}
-
-if [[ "$INSTALL_3XUI" =~ ^[YyДд]$ ]]; then
-    read -rp "Какую версию 3X-UI установить? (Enter = последняя стабильная): " UI_VERSION
-    UI_VERSION="${UI_VERSION:-}"
-
-    if [ -n "$UI_VERSION" ]; then
-        export VERSION="$UI_VERSION"
-        log "Подготовка к установке версии: $UI_VERSION"
-    else
-        unset VERSION 2>/dev/null || true
-        log "Подготовка к установке последней стабильной версии"
-    fi
-
-    log "Запуск тихой установки 3X-UI..."
-    set +e
-    echo "e" | bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-    INSTALL_RC=$?
-    set -e
-
-    if ! command -v x-ui >/dev/null 2>&1; then
-        die "Установка 3X-UI завершилась ошибкой (rc=$INSTALL_RC). Скрипт остановлен."
-    fi
-    ok "Панель 3X-UI успешно настроена на сервере."
-
-    echo -e "${CYAN}=========================================================${NC}"
-    echo -e "${YELLOW}ВАЖНАЯ ПАУЗА!${NC} Перейдите в консоль сервера, введите команду: ${CYAN}x-ui${NC}"
-    echo -e "Обязательно настройте: ВНУТРЕННИЙ порт и СЕКРЕТНЫЙ путь (webBasePath) в режиме HTTP."
-    read -rp "После настройки параметров панели нажмите [Enter] для продолжения..."
-    echo -e "${CYAN}=========================================================${NC}"
-else
-    log "Установка 3X-UI пропущена. Переходим к конфигурации Nginx."
-fi
-
-# ═════════════════════════════════════════════════════════════
-# 2. ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ
-# ═════════════════════════════════════════════════════════════
-echo
-echo -e "${YELLOW}Укажите все домены через ПРОБЕЛ.${NC}"
-echo -e "Первый домен будет основным (Primary), остальные добавятся как альтернативные (SAN)."
+echo -e "${YELLOW}Шаг 1: Доменные имена${NC}"
+echo -e "Укажите все домены через ПРОБЕЛ. Первый домен — основной (декой + панель)."
 read -rp "Введите домены: " -a DOMAINS
 
 if [ ${#DOMAINS[@]} -eq 0 ]; then
@@ -97,56 +77,109 @@ if [ ${#DOMAINS[@]} -eq 0 ]; then
 fi
 
 PRIMARY_DOMAIN="${DOMAINS[0]}"
-
-# Валидация формата главного домена
 [[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
     || die "Некорректный формат главного домена: $PRIMARY_DOMAIN"
 
-read -rp "Введите секретный путь панели (например, dashboard): " RAW_PATH
-[ -n "$RAW_PATH" ] || die "Секретный путь панели не может быть пустым."
-
-read -rp "Введите внутренний порт панели 3X-UI (например, 10443): " PANEL_PORT
-[[ "$PANEL_PORT" =~ ^[0-9]+$ ]] && [ "$PANEL_PORT" -ge 1 ] && [ "$PANEL_PORT" -le 65535 ] \
-    || die "Недопустимый числовой порт: $PANEL_PORT"
-
-read -rp "Email для Let's Encrypt (Enter = без уведомлений): " LE_EMAIL
-
-# Нормализация формата путей панели (строго /путь/)
+echo
+echo -e "${YELLOW}Шаг 2: Настройка портов и путей панели 3X-UI${NC}"
+prompt_default "Внутренний порт вашей веб-панели 3X-UI" "10443" PANEL_PORT
+prompt_default "Секретный путь к веб-панели (например, /dashboard/)" "/dashboard/" RAW_PATH
 PANEL_PATH=$(echo "/${RAW_PATH}/" | tr -s '/')
 
-# ───────────────── Предполётные проверки ────────────────────
-log "Проверка доступности локального порта 80..."
-if ! check_port_free 80; then
-    HOLDER=$(ss -tlnpH "sport = :80" 2>/dev/null | head -1 | awk '{print $6}')
-    warn "Порт 80 занят сторонним процессом: $HOLDER"
-    read -rp "Всё равно продолжить? [y/N]: " ans
-    [[ "${ans,,}" == "y" ]] || die "Освободите порт 80 и запустите скрипт повторно."
+# ДОБАВЛЕНО ДЛЯ ИСПРАВЛЕНИЯ ПОДПИСОК: Выделенный внутренний порт подписок
+prompt_default "Выделенный внутренний порт подписок 3X-UI" "55443" SUB_PORT
+
+# Валидация портов панели и подписок
+if [[ ! "$PANEL_PORT" =~ ^[0-9]+$ ]] || [ "$PANEL_PORT" -le 0 ] || [ "$PANEL_PORT" -gt 65535 ]; then
+    die "Некорректный порт панели: $PANEL_PORT."
+fi
+if [[ ! "$SUB_PORT" =~ ^[0-9]+$ ]] || [ "$SUB_PORT" -le 0 ] || [ "$SUB_PORT" -gt 65535 ]; then
+    die "Некорректный порт подписок: $SUB_PORT."
+fi
+if [ "$PANEL_PORT" -eq "$SUB_PORT" ]; then
+    die "Порт панели и порт подписок не должны совпадать!"
+fi
+
+echo
+echo -e "${YELLOW}Шаг 3: Настройка инбаундов VLESS Reality${NC}"
+echo -e "Укажите внутренние порты REALITY через ПРОБЕЛ (например: 54320 54322 54324)."
+echo -e "Каждому альтернативному домену будет назначен свой порт по порядку."
+read -rp "Введите порты Reality [54320]: " -a REALITY_PORTS
+
+if [ ${#REALITY_PORTS[@]} -eq 0 ]; then
+    REALITY_PORTS=("54320")
+fi
+
+# Валидация портов Reality
+for port in "${REALITY_PORTS[@]}"; do
+    if [[ ! "$port" =~ ^[0-9]+$ ]] || [ "$port" -le 0 ] || [ "$port" -gt 65535 ]; then
+        die "Некорректный порт Reality: $port. Порт должен быть числом от 1 до 65535."
+    fi
+done
+
+echo
+echo -e "${GREEN}[i] ОПЦИЯ АКТИВНА — HYSTERIA 2 (UDP):${NC}"
+echo -e "    Входной порт ${CYAN}443/UDP${NC} автоматически зарезервирован под прямой биндинг в Xray."
+echo -e "    Nginx не будет обрабатывать этот UDP-трафик, что гарантирует максимальную"
+echo -e "    скорость и минимальный пинг как на Armbian, так и на Ryzen VPS."
+
+echo
+echo -e "${YELLOW}Шаг 4: Выбор шаблона маскировки (Decoy)${NC}"
+echo -e " 1) Имитация CosmosCloud (авторизация, API-заглушки, заголовок X-Cosmoscloud)"
+echo -e " 2) Стандартный минималистичный веб-сайт Nginx"
+prompt_default "Выберите вариант (1 или 2)" "1" DECOY_TEMPLATE
+
+echo
+echo -e "${YELLOW}Шаг 5: Служебные параметры${NC}"
+prompt_default "Email для Let's Encrypt (Enter — без уведомлений)" "" LE_EMAIL
+
+# Проверка DNS
+log "Проверка DNS-записей..."
+WAN_IP=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 ifconfig.me || echo "")
+dns_error=0
+if [ -n "$WAN_IP" ]; then
+    for d in "${DOMAINS[@]}"; do
+        resolved_ip=$(dig +short "$d" @8.8.8.8 | tail -n1 || echo "")
+        if [ -z "$resolved_ip" ]; then
+            resolved_ip=$(getent ahosts "$d" | awk '{print $1}' | head -n1 || echo "")
+        fi
+        
+        if [ -z "$resolved_ip" ]; then
+            warn "Домен $d не разрешается в IP-адрес (возможно, DNS-запись еще не обновилась)."
+            dns_error=1
+        elif [ "$resolved_ip" != "$WAN_IP" ]; then
+            warn "Домен $d указывает на IP ($resolved_ip), а ваш server имеет IP ($WAN_IP)."
+            dns_error=1
+        fi
+    done
+    if [ "$dns_error" -eq 1 ]; then
+        read -rp "Обнаружены несовпадения DNS. Всё равно продолжить? [y/N]: " dns_ans
+        [[ "${dns_ans,,}" == "y" ]] || die "Исправьте DNS-записи и запустите скрипт повторно."
+    fi
+else
+    warn "Не удалось определить внешний IP-адрес сервера для автоматической проверки DNS."
 fi
 
 # ═════════════════════════════════════════════════════════════
-# 3. ПОДКЛЮЧЕНИЕ ОФИЦИАЛЬНОГО REPO NGINX И УСТАНОВКА
+# 6. ПОДКЛЮЧЕНИЕ REPO NGINX И УСТАНОВКА СЛУЖБ
 # ═════════════════════════════════════════════════════════════
-log "Подготовка окружения и добавление репозитория Nginx.org..."
+log "Подключение官方репозитория Nginx.org..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install curl gnupg2 ca-certificates lsb-release ubuntu-keyring certbot openssl -y -q
+apt-get install gnupg2 ca-certificates lsb-release ubuntu-keyring openssl snapd -y -q
 
-# Импорт ключа подписи
+mkdir -p /usr/share/keyrings
 curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes
 
-# Определение версии дистрибутива
 OS_ID=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
 OS_CODENAME=$(lsb_release -cs)
 
-# Добавление репозитория
 echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/$OS_ID $OS_CODENAME nginx" \
     | tee /etc/apt/sources.list.d/nginx.list
 
-# Настройка приоритетов apt (pinning)
 cat << EOF > /etc/apt/preferences.d/99nginx
-Package: *
+Package: nginx*
 Pin: origin nginx.org
-Pin: release o=nginx
 Pin-Priority: 900
 EOF
 
@@ -154,27 +187,28 @@ log "Установка официальной сборки Nginx..."
 apt-get update -q
 apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" nginx -y -q
 
-log "Конфигурация директорий веб-корня..."
+NGINX_USER="nginx"
+if ! id -u nginx >/dev/null 2>&1; then
+    NGINX_USER="www-data"
+fi
+
+log "Подготовка директорий..."
 WEBROOT="/var/www/html"
 mkdir -p "$WEBROOT/.well-known/acme-challenge"
-chown -R www-data:www-data "$WEBROOT"
+chown -R "$NGINX_USER:$NGINX_USER" "$WEBROOT"
 
-# Полная зачистка старых ссылок старых пакетов Ubuntu во избежание конфликтов
 rm -f /etc/nginx/sites-enabled/default \
       /etc/nginx/sites-available/default \
-      /etc/nginx/sites-enabled/*host74* \
       "/etc/nginx/sites-enabled/$PRIMARY_DOMAIN" \
       "/etc/nginx/sites-available/$PRIMARY_DOMAIN"
 
-# Отключение стандартной конфигурации Nginx.org
 if [ -f /etc/nginx/conf.d/default.conf ]; then
     mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled
 fi
 
 NGINX_SERVER_NAMES="${DOMAINS[*]}"
 
-# Временный HTTP-сервер для прохождения проверки Certbot
-log "Создание временного виртуального хоста Nginx для верификации..."
+log "Создание временного хоста для верификации Certbot..."
 cat << EOF > "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
 server {
     listen 80;
@@ -188,33 +222,55 @@ server {
 }
 EOF
 
-nginx -t || die "Ошибка в структуре временной конфигурации Nginx."
+nginx -t || die "Ошибка во временной конфигурации Nginx."
 systemctl restart nginx || systemctl start nginx
 
 # ═════════════════════════════════════════════════════════════
-# 4. ВЫПУСК МУЛЬТИДОМЕННОГО СЕРТИФИКАТА И ХАРДЕНИНГ
+# 7. УСТАНОВКА CERTBOT ЧЕРЕЗ SNAP
 # ═════════════════════════════════════════════════════════════
-log "Сборка аргументов для выпуска единого SSL-сертификата..."
-CERTBOT_ARGS=(certonly --webroot -w "$WEBROOT" --agree-tos -n --expand)
+log "Подготовка окружения Snap..."
+apt-get purge -y certbot || true
 
+systemctl start snapd.socket || true
+systemctl enable snapd.socket || true
+
+log "Ожидание инициализации службы snapd..."
+for i in {1..15}; do
+    if snap version >/dev/null 2>&1; then
+        log "Служба snapd запущена и готова к работе."
+        break
+    fi
+    warn "Инициализация snapd в фоне... Попытка $i/15"
+    sleep 2
+done
+
+log "Установка Certbot..."
+snap install core || true
+snap refresh core || true
+snap install --classic certbot
+
+ln -sf /snap/bin/certbot /usr/bin/certbot
+
+# ═════════════════════════════════════════════════════════════
+# 8. ВЫПУСК СЕРТИФИКАТА С ПОДДЕРЖКОЙ SAN
+# ═════════════════════════════════════════════════════════════
+log "Запрос SSL-сертификата Let's Encrypt для всех доменов..."
+CERTBOT_ARGS=(certonly --webroot -w "$WEBROOT" --agree-tos -n --expand)
 for d in "${DOMAINS[@]}"; do
     CERTBOT_ARGS+=(-d "$d")
 done
-
 if [ -n "$LE_EMAIL" ]; then
     CERTBOT_ARGS+=(--email "$LE_EMAIL")
 else
     CERTBOT_ARGS+=(--register-unsafely-without-email)
 fi
 
-log "Запрос сертификатов в Let's Encrypt для всех поддоменов..."
-set +e
-certbot "${CERTBOT_ARGS[@]}"
-CERTBOT_RC=$?
-set -e
+if ! certbot "${CERTBOT_ARGS[@]}"; then
+    warn "Certbot завершил работу с ошибкой. Проверяем, появились ли сертификаты..."
+fi
 
 if [ ! -d "/etc/letsencrypt/live/$PRIMARY_DOMAIN" ]; then
-    die "Не удалось получить SSL-сертификат (rc=$CERTBOT_RC)."
+    die "Не удалось получить SSL-сертификат (папка /etc/letsencrypt/live/$PRIMARY_DOMAIN не найдена)."
 fi
 
 chmod 755 /etc/letsencrypt/archive
@@ -222,15 +278,16 @@ chmod 755 /etc/letsencrypt/live
 
 DH_PARAM="/etc/nginx/dhparam.pem"
 if [ ! -f "$DH_PARAM" ]; then
-    log "Генерация параметров Диффи-Хеллмана (2048 бит)..."
+    warn "Генерация параметров Диффи-Хеллмана..."
     openssl dhparam -out "$DH_PARAM" 2048 2>/dev/null
 fi
 
 # ═════════════════════════════════════════════════════════════
-# 5. ГЕНЕРАЦИЯ СТРАНИЦЫ АВТОРИЗАЦИИ
+# 9. ГЕНЕРАЦИЯ СТРАНИЦЫ МАСКИРОВКИ
 # ═════════════════════════════════════════════════════════════
-log "Создание оригинальной frontend-страницы с часами и logo.webp..."
-cat << 'EOF' > /var/www/html/index.html
+log "Создание frontend-страницы маскировки (Шаблон: $DECOY_TEMPLATE)..."
+if [ "$DECOY_TEMPLATE" = "1" ]; then
+    cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -240,33 +297,24 @@ cat << 'EOF' > /var/www/html/index.html
     <style>
         body { margin:0; padding:20px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background-color:#cbcae0; background-image:linear-gradient(135deg,#e2e1ec 0%,#bcbbcb 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; color:#333; box-sizing:border-box; }
         .page-wrapper { width:100%; max-width:420px; display:flex; flex-direction:column; align-items:center; box-shadow:0 15px 35px rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; }
-        .banner-img { width:100%; height:auto; display:block; }
         .login-container { background:#fff; width:100%; text-align:center; padding:35px 30px; box-sizing:border-box; }
         .header-title { font-size:20px; color:#4a4557; margin-bottom:25px; font-weight:400; }
         .input-group { position:relative; margin-bottom:14px; }
-        input { width:100%; padding:12px 15px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:15px; outline:none; transition:border-color .2s,box-shadow .2s; background:#fdfdfd; }
-        input:focus { border-color:#735b8c; box-shadow:0 0 0 3px rgba(115,91,140,.15); background:#fff; }
-        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; transition:background .2s,opacity .2s; display:flex; justify-content:center; align-items:center; height:44px; }
-        button:hover { background:#5d4874; }
-        button:disabled { opacity:.7; cursor:not-allowed; }
-        .message-box { background:#e74c3c; color:#fff; padding:11px; border-radius:6px; margin-bottom:20px; font-size:14px; text-align:left; display:none; animation:fadeIn .3s ease; }
-        .spinner { display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.3); border-top:2px solid #fff; border-radius:50%; animation:spin .8s linear infinite; }
+        input { width:100%; padding:12px 15px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:15px; outline:none; background:#fdfdfd; }
+        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; height:44px; }
+        .message-box { background:#e74c3c; color:#fff; padding:11px; border-radius:6px; margin-bottom:20px; font-size:14px; text-align:left; display:none; }
         .footer-text { margin-top:25px; color:rgba(60,55,70,.6); font-size:13px; text-align:center; width:100%; }
         .footer-text a { color:#735b8c; text-decoration:none; font-weight:500; }
-        .footer-text a:hover { text-decoration:underline; }
-        @keyframes spin { 100% { transform:rotate(360deg); } }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
     </style>
 </head>
 <body>
     <div class="page-wrapper">
-        <img class="banner-img" src="logo.webp" alt="Cloud Header" onerror="this.style.display='none'">
         <div class="login-container">
             <div class="header-title">Вход в облако</div>
             <div id="errorBox" class="message-box"></div>
             <form id="loginForm" onsubmit="fakeLogin(event)">
-                <div class="input-group"><input id="user" type="text" placeholder="Имя пользователя или email" autocomplete="username" required></div>
-                <div class="input-group"><input id="pass" type="password" placeholder="Пароль" autocomplete="current-password" required></div>
+                <div class="input-group"><input id="user" type="text" placeholder="Имя пользователя или email" required></div>
+                <div class="input-group"><input id="pass" type="password" placeholder="Пароль" required></div>
                 <button type="submit" id="loginBtn">Войти</button>
             </form>
         </div>
@@ -276,133 +324,217 @@ cat << 'EOF' > /var/www/html/index.html
         <span id="server-time"></span>
     </div>
     <script>
-        function setFakeCookie() { document.cookie = "cosmos_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax"; }
         function fakeLogin(e) {
             e.preventDefault();
             const btn = document.getElementById("loginBtn"), errBox = document.getElementById("errorBox");
-            errBox.style.display = "none"; btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
+            errBox.style.display = "none"; btn.disabled = true; btn.innerText = 'Вход...';
             setTimeout(() => {
-                btn.disabled = false; btn.innerHTML = 'Войти';
+                btn.disabled = false; btn.innerText = 'Войти';
                 errBox.innerText = "Неверное имя пользователя или указанный пароль.";
                 errBox.style.display = "block";
-                document.getElementById("pass").value = ""; document.getElementById("pass").focus();
-            }, 1500);
+                document.getElementById("pass").value = "";
+            }, 1200);
         }
         function updateServerTime() { const t = document.getElementById("server-time"); if (t) t.innerText = "Время сервера: " + new Date().toLocaleTimeString(); }
-        setInterval(updateServerTime, 1000); updateServerTime(); setFakeCookie();
+        setInterval(updateServerTime, 1000); updateServerTime();
     </script>
 </body>
 </html>
 EOF
-chown www-data:www-data "$WEBROOT/index.html"
+else
+    cat << 'EOF' > /var/www/html/index.html
+<!DOCTYPE html>
+<html>
+<head><title>Welcome to nginx!</title></head>
+<body><h1>Welcome to nginx!</h1></body>
+</html>
+EOF
+fi
+chown "$NGINX_USER:$NGINX_USER" "$WEBROOT/index.html"
 
 # ═════════════════════════════════════════════════════════════
-# 6. СБОРКА И ПРИМЕНЕНИЕ КОНФИГУРАЦИИ NGINX
+# 10. НАСТРОЙКА NGINX CONFIGS (STREAM + HTTP)
 # ═════════════════════════════════════════════════════════════
-log "Создание глобальной конфигурации WebSocket-карт..."
+log "Бэкап и замена глобального nginx.conf..."
+[ -f /etc/nginx/nginx.conf ] && cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+
+cat << EOF > /etc/nginx/nginx.conf
+user $NGINX_USER;
+worker_processes auto;
+worker_rlimit_nofile 65535;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 10240;
+    multi_accept on;
+    use epoll;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" \$status \$body_bytes_sent';
+    access_log /var/log/nginx/access.log main;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    include /etc/nginx/conf.d/*.conf;
+}
+
+stream {
+    include /etc/nginx/stream.d/*.conf;
+}
+EOF
+
+mkdir -p /etc/nginx/stream.d
+
 cat << 'EOF' > /etc/nginx/conf.d/00-maps.conf
-# Глобальная карта апгрейда соединений WebSocket (защита от дублирования при мультидоменности)
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
 EOF
 
-log "Сборка финальной замаскированной конфигурации веб-сервера..."
+log "Сборка конфигурации L4 Stream..."
+STREAM_MAP_RULES=""
+REALITY_UPSTREAMS=""
+NUM_PORTS=${#REALITY_PORTS[@]}
 
-cat << 'EOF' > "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-########################################
-# 1. HTTP -> HTTPS REDIRECT (ALL DOMAINS)
-########################################
-server {
-    listen 80;
-    server_name __NGINX_SERVER_NAMES__;
-    server_tokens off;
+for ((i=1; i<${#DOMAINS[@]}; i++)); do
+  PORT_INDEX=$((i - 1))
+  if [ "$PORT_INDEX" -lt "$NUM_PORTS" ]; then
+     CURRENT_PORT="${REALITY_PORTS[$PORT_INDEX]}"
+  else
+     CURRENT_PORT="${REALITY_PORTS[0]}"
+  fi
+  STREAM_MAP_RULES+="    ${DOMAINS[$i]}      reality_backend_$CURRENT_PORT;\n"
+done
 
-    location ^~ /.well-known/acme-challenge/ {
-        root __WEBROOT__;
-        try_files $uri =404;
-    }
-    location / {
-        return 301 https://$host$request_uri;
-    }
+UNIQUE_PORTS=($(echo "${REALITY_PORTS[@]}" | tr ' ' '\n' | awk '!x[$0]++'))
+for port in "${UNIQUE_PORTS[@]}"; do
+  REALITY_UPSTREAMS+="
+upstream reality_backend_$port {
+    server 127.0.0.1:$port;
+}
+"
+done
+
+cat << EOF > "/etc/nginx/stream.d/$PRIMARY_DOMAIN.conf"
+map \$ssl_preread_server_name \$backend_gate {
+    ""                 nginx_http_backend;
+    $PRIMARY_DOMAIN     nginx_http_backend;
+$(echo -e "$STREAM_MAP_RULES")
+    default              nginx_http_backend;
 }
 
-########################################
-# 2. MAIN HTTPS MASK: PRODUCTION (COSMOS ONLY)
-########################################
+upstream nginx_http_backend {
+    server 127.0.0.1:8444;
+}
+
+$REALITY_UPSTREAMS
+
 server {
-    listen 443 ssl;
-    http2 on;
-    
-    server_name __NGINX_SERVER_NAMES__;
+    listen 127.0.0.1:8444;
+    proxy_pass 127.0.0.1:9443;
+    proxy_protocol on;
+}
 
-    ssl_certificate     /etc/letsencrypt/live/__PRIMARY_DOMAIN__/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/__PRIMARY_DOMAIN__/privkey.pem;
-    ssl_dhparam         __DH_PARAM__;
+server {
+    listen 443;
+    ssl_preread on;
+    proxy_pass \$backend_gate;
+    proxy_connect_timeout 5s;
+    proxy_timeout 1h;
+}
+EOF
 
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    root __WEBROOT__;
-    index index.html;
-    server_tokens off;
-
-    # Имитационные заголовки чистого CosmosCloud (Строго без PHP)
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header X-Robots-Tag "noindex, nofollow" always;
-    add_header X-Cosmoscloud-Version "0.22.18" always;
-    add_header Strict-Transport-Security "max-age=15768000; includeSubDomains" always;
-
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    client_max_body_size 50m;
-
-    ########################################
-    # REVERSE PROXY НА ПАНЕЛЬ 3X-UI
-    ########################################
-    location ^~ __PANEL_PATH__ {
-        proxy_pass http://127.0.0.1:__PANEL_PORT__;
-
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host $http_host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-
-        proxy_hide_header X-Cosmoscloud-Version;
-        proxy_hide_header X-Frame-Options;
-
-        proxy_intercept_errors off;
-    }
-
-    ########################################
-    # API-ЗАГЛУШКИ COSMOSCLOUD
-    ########################################
+COSMOS_HEADER=""
+COSMOS_MOCK_API=""
+if [ "$DECOY_TEMPLATE" = "1" ]; then
+  COSMOS_HEADER='add_header X-Cosmoscloud-Version "0.22.18" always;'
+  COSMOS_MOCK_API='
     location ~ ^/(api/v1/status|status)$ {
         default_type application/json;
-        return 200 '{"installed":true,"maintenance":false,"version":"0.22.18","productname":"CosmosCloud"}\n';
+        return 200 "{\"installed\":true,\"maintenance\":false,\"version\":\"0.22.18\",\"productname\":\"CosmosCloud\"}\n";
     }
-
     location = /api/v1/auth/login {
         if ($request_method = POST) {
             add_header Set-Cookie "cosmos_session=$request_id; path=/; Secure; HttpOnly; SameSite=Lax" always;
-            return 200 '{"status":"OK","message":"Authenticated"}\n';
+            return 200 "{\"status\":\"OK\",\"message\":\"Authenticated\"}\n";
         }
         return 405;
+    }'
+fi
+
+log "Сборка HTTP-конфигурации веб-сервера..."
+cat << EOF > "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
+server {
+    listen 80;
+    server_name $NGINX_SERVER_NAMES;
+    server_tokens off;
+    location ^~ /.well-known/acme-challenge/ {
+        root $WEBROOT;
+        try_files \$uri =404;
     }
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 127.0.0.1:9443 ssl proxy_protocol;
+    http2 on;
+    server_name $NGINX_SERVER_NAMES;
+
+    set_real_ip_from 127.0.0.1;
+    real_ip_header proxy_protocol;
+
+    ssl_certificate     /etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem;
+    ssl_dhparam         $DH_PARAM;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+
+    root $WEBROOT;
+    index index.html;
+    server_tokens off;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    $COSMOS_HEADER
+    add_header Strict-Transport-Security "max-age=15768000; includeSubDomains" always;
+
+    location ^~ $PANEL_PATH {
+        proxy_pass http://127.0.0.1:$PANEL_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_hide_header X-Cosmoscloud-Version;
+        proxy_hide_header X-Frame-Options;
+        proxy_intercept_errors off;
+    }
+
+    # ИЗМЕНЕНО ДЛЯ ИСПРАВЛЕНИЯ ПОДПИСОК: Перенаправляем строго на внутренний SUB_PORT подписок
+    location ^~ /postkey/ {
+        proxy_pass http://127.0.0.1:$SUB_PORT;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_hide_header X-Cosmoscloud-Version;
+        proxy_hide_header X-Frame-Options;
+    }
+
+    $COSMOS_MOCK_API
 
     location = / {
         try_files /index.html =404;
@@ -411,48 +543,16 @@ server {
     location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|webp)$ {
         expires 7d;
         access_log off;
-        add_header Cache-Control "public";
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header Referrer-Policy "no-referrer-when-downgrade" always;
-        add_header X-Robots-Tag "noindex, nofollow" always;
-        add_header X-Cosmoscloud-Version "0.22.18" always;
-        try_files $uri =404;
+        try_files \$uri =404;
     }
 
-    location = /robots.txt {
-        add_header Content-Type text/plain;
-        return 200 "User-agent: *\nDisallow: /\n";
-    }
-
-    location = /favicon.ico {
-        access_log off;
-        log_not_found off;
-    }
-
-    location / {
-        return 404;
-    }
+    location / { return 404; }
 }
 EOF
 
-# Безопасная подстановка переменных динамического окружения
-sed -i "s|__NGINX_SERVER_NAMES__|$NGINX_SERVER_NAMES|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-sed -i "s|__WEBROOT__|$WEBROOT|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-sed -i "s|__PRIMARY_DOMAIN__|$PRIMARY_DOMAIN|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-sed -i "s|__DH_PARAM__|$DH_PARAM|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-sed -i "s|__PANEL_PATH__|$PANEL_PATH|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
-sed -i "s|__PANEL_PORT__|$PANEL_PORT|g" "/etc/nginx/conf.d/$PRIMARY_DOMAIN.conf"
+log "Проверка и перезапуск конфигурации Nginx..."
+nginx -t || die "Ошибка конфигурации Nginx."
 
-log "Проверка конфигурации Nginx..."
-nginx -t || die "Ошибка в итоговой конфигурации Nginx."
-
-systemctl restart nginx
-ok "Конфигурация с современным HTTP/2 успешно перезапущена!"
-
-# ═════════════════════════════════════════════════════════════
-# 7. АВТОПРОДЛЕНИЕ И КРОН-ХУКИ
-# ═════════════════════════════════════════════════════════════
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy/
 cat << 'EOF' > /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 #!/bin/bash
@@ -460,14 +560,48 @@ systemctl reload nginx
 EOF
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 
+systemctl unmask nginx || true
+systemctl enable nginx || true
+systemctl restart nginx
+
+FORMATTED_PORTS=$(echo "${UNIQUE_PORTS[@]}" | sed 's/ /, /g')
+
+# ═════════════════════════════════════════════════════════════
+#  ФИНАЛЬНЫЙ ВЫВОД (ПОЛНОСТЬЮ СОХРАНЕННАЯ СТАРАЯ ИНСТРУКЦИЯ)
+# ═════════════════════════════════════════════════════════════
 echo
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "        ОБНОВЛЕННЫЙ СКРИПТ УСПЕШНО ОТРАБОТАЛ!${NC}"
+echo -e "        УСТАНОВКА И НАСТРОЙКА УСПЕШНО ЗАВЕРШЕНА!"
+echo -e "                  (ARMBIAN & INTEL NOBLE OK)"
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "Домены в маске:  ${CYAN}${DOMAINS[*]}${NC}"
-echo -e "Nginx ветка:     ${GREEN}Официальный Repo Nginx.org (1.25.1+)${NC}"
-echo -e "HTTP/2 статус:   ${GREEN}ВКЛЮЧЕН (директива 'http2 on;' активна)${NC}"
-echo -e "Логотип:         ${GREEN}В коде восстановлена оригинальная ссылка на logo.webp${NC}"
+echo -e "Маскировочный домен:  ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
+echo -e "Альтернативные (SAN): ${YELLOW}${DOMAINS[@]:1}${NC}"
+echo -e "Вход в панель 3X-UI:  ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
+echo -e "SSL Сертификаты:      ${GREEN}/etc/letsencrypt/live/${PRIMARY_DOMAIN}/${NC}"
+echo
+echo -e "${YELLOW}ВАЖНО: ВЫ ДОЛЖНЫ ВРУЧНУЮ НАСТРОИТЬ ВАШ ФАЙРВОЛ:${NC}"
+echo -e "Разрешите входящие порты:   ${GREEN}80/TCP, 443/TCP, 443/UDP, [Ваш кастомный порт SSH]${NC}"
+echo -e "Заблокируйте для внешних:   ${RED}$PANEL_PORT (Панель 3X-UI), $FORMATTED_PORTS (Reality порты)${NC}"
+echo
+echo -e "${YELLOW}ФИНАЛЬНЫЙ ШАГ: НАСТРОЙТЕ ИНБАУНДЫ В ПАНЕЛИ 3X-UI:${NC}"
+echo -e "1. Настройка инбаундов ${GREEN}VLESS REALITY${NC}:"
+echo -e "   - Создайте инбаунды под каждый порт: ${GREEN}$FORMATTED_PORTS${NC}"
+echo -e "   - Для каждого инбаунда обязательно установите ${CYAN}Listen IP (IP)${NC} в значение ${GREEN}127.0.0.1${NC}."
+echo -e "   - В клиентах при подключении используйте соответствующий домен (SNI), порт всегда ставьте ${GREEN}443${NC}."
+echo
+echo -e "2. Настройка инбаунда ${GREEN}Hysteria 2${NC}:"
+echo -e "   - Порт: ${GREEN}443${NC}, Listen IP: ${GREEN}0.0.0.0${NC} (Протокол: ${CYAN}UDP${NC})."
+echo -e "   - Пути к сертификатам: ${CYAN}/etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem${NC} / ${CYAN}privkey.pem${NC}"
+echo
+echo -e "3. Настройка системы подписок (Subscriptions) в 3X-UI (ОБНОВЛЕНО С ДОПОМ):"
+echo -e "   - Перейдите в веб-интерфейс панели -> ${CYAN}Настройки панели${NC} -> вкладка ${CYAN}Настройки подписок${NC} (или просто 'Подписка')."
+echo -e "   - Нажмите галочку ${GREEN}Включить подписку (Enable Subscription)${NC}."
+echo -e "   - В поле ${CYAN}Порт подписки (Subscription port)${NC} впишите выделенный порт: ${GREEN}$SUB_PORT${NC}."
+echo -e "   - В поле ${CYAN}URI-путь подписки (Subscription path)${NC} строго укажите: ${GREEN}/postkey/${NC}."
+echo -e "   - В поле ${CYAN}URI обратного прокси / Шаблон URL (Subscription URL template)${NC} пропишите чистый домен без портов:"
+echo -e "     ${GREEN}https://${PRIMARY_DOMAIN}/postkey/%uuid%${NC}  *(Или укажите адрес прокси как https://${PRIMARY_DOMAIN}/postkey/)*"
+echo -e "   - Нажмите ${YELLOW}Сохранить настройки${NC} и обязательно нажмите ${CYAN}Перезапустить панель${NC}."
+echo -e "   - ${CYAN}Важно:${NC} Теперь все запросы клиентов будут идти на стандартный безопасный порт 443, а Nginx сам передаст их панели."
 echo
 
 exit 0
