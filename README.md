@@ -1,5 +1,5 @@
 
-# Nginx L4 Stream Router & Mask for 3X-UI / Xray (v6.9.2)
+# Nginx L4 Stream Router & Mask for 3X-UI (v1.0.2 from ItMan75)
 
 Автоматизированный скрипт для развертывания отказоустойчивой, высокопроизводительной и безопасной маскировки VPN-сервера на базе официальной сборки **Nginx (Stream L4 Router)** и панели **3X-UI**.
 
