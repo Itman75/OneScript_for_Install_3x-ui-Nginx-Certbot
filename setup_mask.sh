@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v1.0.2-Linux/Armbian-Universal)
+# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v1.0.3-Universal)
 # Highly Configurable Nginx Stream L4 Router & Mask for 3X-UI from ItMan75
 #
 
@@ -21,7 +21,7 @@ die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.0.2 (Production Setup)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.0.3 (Production Setup)${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -120,8 +120,7 @@ done
 echo
 echo -e "${GREEN}[i] ОПЦИЯ АКТИВНА — HYSTERIA 2 (UDP):${NC}"
 echo -e "    Входной порт ${CYAN}443/UDP${NC} автоматически зарезервирован под прямой биндинг в Xray."
-echo -e "    Nginx не будет обрабатывать этот UDP-трафик, что гарантирует максимальную"
-echo -e "    скорость и минимальный пинг как на Armbian, так и на Ryzen VPS."
+echo -e "    Nginx не будет обрабатывать этот UDP-трафик, что гарантирует максимальную скорость и минимальный пинг"
 
 echo
 echo -e "${YELLOW}Шаг 4: Выбор шаблона маскировки (Decoy)${NC}"
@@ -252,7 +251,7 @@ snap install --classic certbot
 ln -sf /snap/bin/certbot /usr/bin/certbot
 
 # ═════════════════════════════════════════════════════════════
-# 8. ВЫПУСК СЕРТИФИКАТА С ПОДДЕРЖКОЙ SAN (Мультидоменный сертификат)
+# 8. ВЫПУСК СЕРТИФИКАТА С ПОДДЕРЖКОЙ SAN
 # ═════════════════════════════════════════════════════════════
 log "Запрос SSL-сертификата Let's Encrypt для всех доменов..."
 CERTBOT_ARGS=(certonly --webroot -w "$WEBROOT" --agree-tos -n --expand)
@@ -283,7 +282,7 @@ if [ ! -f "$DH_PARAM" ]; then
 fi
 
 # ═════════════════════════════════════════════════════════════
-# 9. ГЕНЕРАЦИЯ СТРАНИЦЫ МАСКИРОВКИ
+# 9. ГЕНЕРАЦИЯ СТРАНИЦЫ МАСКИРОВКИ (ВЫБОР ШАБЛОНА)
 # ═════════════════════════════════════════════════════════════
 log "Создание frontend-страницы маскировки (Шаблон: $DECOY_TEMPLATE)..."
 if [ "$DECOY_TEMPLATE" = "1" ]; then
@@ -595,14 +594,13 @@ FORMATTED_PORTS=$(echo "${UNIQUE_PORTS[@]}" | sed 's/ /, /g')
 echo
 echo -e "${GREEN}=========================================================${NC}"
 echo -e "        УСТАНОВКА И НАСТРОЙКА УСПЕШНО ЗАВЕРШЕНА!"
-echo -e "                  (ARMBIAN & INTEL NOBLE OK)"
 echo -e "${GREEN}=========================================================${NC}"
-echo -e "Адрес облака-заглушки:  ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
+echo -e "Адрес Облака-заглушки:  ${CYAN}https://${PRIMARY_DOMAIN}${NC}"
 echo -e "Альтернативные (SAN): ${YELLOW}${DOMAINS[@]:1}${NC}"
 echo -e "Вход в панель 3X-UI:  ${CYAN}https://${PRIMARY_DOMAIN}${PANEL_PATH}${NC}"
 echo -e "SSL Сертификаты:      ${GREEN}/etc/letsencrypt/live/${PRIMARY_DOMAIN}/${NC}"
 echo
-echo -e "${YELLOW}ВАЖНО: ВЫ ДОЛЖНЫ ВРУЧНУЮ НАСТРОИТЬ ВАШ ФАЙРВОЛ:${NC}"
+echo -e "${YELLOW}ВАЖНО: ВЫ ДОЛЖНЫ ВРУЧНУЮ НАСТРОИТЬ ВАШ ФАЙЕРВОЛ:${NC}"
 echo -e "Разрешите входящие порты:   ${GREEN}80/TCP, 443/TCP, 443/UDP, [Ваш кастомный порт SSH]${NC}"
 echo -e "Заблокируйте для внешних:   ${RED}$PANEL_PORT (Панель 3X-UI), $FORMATTED_PORTS (Reality порты)${NC}"
 echo
@@ -621,7 +619,7 @@ echo -e "   - Перейдите в веб-интерфейс панели -> ${
 echo -e "   - Нажмите галочку ${GREEN}Включить подписку (Enable Subscription)${NC}."
 echo -e "   - В поле ${CYAN}Порт подписки (Subscription port)${NC} впишите выделенный порт: ${GREEN}$SUB_PORT${NC}."
 echo -e "   - В поле ${CYAN}URI-путь подписки (Subscription path)${NC} строго укажите: ${GREEN}/postkey/${NC}."
-echo -e "   - В поле ${CYAN}URI обратного прокси / Шаблон URL (Subscription URL template)${NC} пропишите чистый домен без портов:"
+echo -e "   - В поле ${CYAN}URI обратного прокси пропишите адрес подписки без портов:"
 echo -e "     ${GREEN}https://${PRIMARY_DOMAIN}/postkey/{NC}."
 echo -e "   - Нажмите ${YELLOW}Сохранить настройки${NC} и обязательно нажмите ${CYAN}Перезапустить панель${NC}."
 echo -e "   - ${CYAN}Важно:${NC} Теперь все запросы клиентов будут идти на стандартный безопасный порт 443, а Nginx сам передаст их панели."
