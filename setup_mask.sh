@@ -287,6 +287,7 @@ fi
 # ═════════════════════════════════════════════════════════════
 log "Создание frontend-страницы маскировки (Шаблон: $DECOY_TEMPLATE)..."
 if [ "$DECOY_TEMPLATE" = "1" ]; then
+    # Шаблон 1: CosmosCloud
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="ru">
@@ -297,14 +298,22 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
     <style>
         body { margin:0; padding:20px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background-color:#cbcae0; background-image:linear-gradient(135deg,#e2e1ec 0%,#bcbbcb 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; color:#333; box-sizing:border-box; }
         .page-wrapper { width:100%; max-width:420px; display:flex; flex-direction:column; align-items:center; box-shadow:0 15px 35px rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; }
+        .banner-img { width:100%; height:auto; display:block; }
         .login-container { background:#fff; width:100%; text-align:center; padding:35px 30px; box-sizing:border-box; }
         .header-title { font-size:20px; color:#4a4557; margin-bottom:25px; font-weight:400; }
         .input-group { position:relative; margin-bottom:14px; }
-        input { width:100%; padding:12px 15px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:15px; outline:none; background:#fdfdfd; }
-        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; height:44px; }
-        .message-box { background:#e74c3c; color:#fff; padding:11px; border-radius:6px; margin-bottom:20px; font-size:14px; text-align:left; display:none; }
+        input { width:100%; padding:12px 15px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box; font-size:15px; outline:none; transition:border-color .2s,box-shadow .2s; background:#fdfdfd; }
+        input:focus { border-color:#735b8c; box-shadow:0 0 0 3px rgba(115,91,140,.15); background:#fff; }
+        button { width:100%; padding:12px; background:#735b8c; color:#fff; border:none; border-radius:6px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; transition:background .2s,opacity .2s; display:flex; justify-content:center; align-items:center; height:44px; }
+        button:hover { background:#5d4874; }
+        button:disabled { opacity:.7; cursor:not-allowed; }
+        .message-box { background:#e74c3c; color:#fff; padding:11px; border-radius:6px; margin-bottom:20px; font-size:14px; text-align:left; display:none; animation:fadeIn .3s ease; }
+        .spinner { display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.3); border-top:2px solid #fff; border-radius:50%; animation:spin .8s linear infinite; }
         .footer-text { margin-top:25px; color:rgba(60,55,70,.6); font-size:13px; text-align:center; width:100%; }
         .footer-text a { color:#735b8c; text-decoration:none; font-weight:500; }
+        .footer-text a:hover { text-decoration:underline; }
+        @keyframes spin { 100% { transform:rotate(360deg); } }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
     </style>
 </head>
 <body>
@@ -325,33 +334,46 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
         <span id="server-time"></span>
     </div>
     <script>
+        function setFakeCookie() { document.cookie = "cosmos_session=" + Math.random().toString(36).substring(2) + "; path=/; Secure; SameSite=Lax"; }
         function fakeLogin(e) {
             e.preventDefault();
             const btn = document.getElementById("loginBtn"), errBox = document.getElementById("errorBox");
-            errBox.style.display = "none"; btn.disabled = true; btn.innerText = 'Вход...';
+            errBox.style.display = "none"; btn.disabled = true; btn.innerHTML = '<div class="spinner"></div>';
             setTimeout(() => {
-                btn.disabled = false; btn.innerText = 'Войти';
+                btn.disabled = false; btn.innerHTML = 'Войти';
                 errBox.innerText = "Неверное имя пользователя или указанный пароль.";
                 errBox.style.display = "block";
-                document.getElementById("pass").value = "";
-            }, 1200);
+                document.getElementById("pass").value = ""; document.getElementById("pass").focus();
+            }, 1500);
         }
         function updateServerTime() { const t = document.getElementById("server-time"); if (t) t.innerText = "Время сервера: " + new Date().toLocaleTimeString(); }
-        setInterval(updateServerTime, 1000); updateServerTime();
+        setInterval(updateServerTime, 1000); updateServerTime(); setFakeCookie();
     </script>
 </body>
 </html>
 EOF
 else
+    # Шаблон 2: Минималистичный Nginx
     cat << 'EOF' > /var/www/html/index.html
 <!DOCTYPE html>
-<html>
-<head><title>Welcome to nginx!</title></head>
-<body><h1>Welcome to nginx!</h1></body>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Welcome to nginx!</title>
+    <style>
+        body { width: 35em; margin: 0 auto; font-family: Tahoma, Verdana, Arial, sans-serif; background-color: #fcfcfc; color: #333; padding-top: 50px; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to nginx!</h1>
+    <p>If you see this page, the nginx web server is successfully installed and working. Further configuration is required.</p>
+    <p>For online documentation and support please refer to <a href="http://nginx.org/">nginx.org</a>.</p>
+    <p><em>Thank you for using nginx.</em></p>
+</body>
 </html>
 EOF
 fi
-chown "$NGINX_USER:$NGINX_USER" "$WEBROOT/index.html"
+chown nginx:nginx "$WEBROOT/index.html"
 
 # ═════════════════════════════════════════════════════════════
 # 10. НАСТРОЙКА NGINX CONFIGS (STREAM + HTTP)
