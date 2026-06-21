@@ -2,12 +2,12 @@
 set -euo pipefail
 
 #####################################
-#  PROD VPS HARDENING (Ubuntu 24.04)
-#  + BBR + Disable IPv6 + Block Ping
-#  + IPv4 ONLY Firewall Rules
-#  + SSH Keys (Auto-gen or Paste)
-#  + 3x-ui
-#  + Extended Utilities
+# PROD VPS HARDENING (Ubuntu 24.04)
+# + BBR + Disable IPv6 + Block Ping
+# + IPv4 ONLY Firewall Rules
+# + SSH Keys (Auto-gen or Paste)
+# + 3x-ui
+# + Extended Utilities
 #####################################
 
 DEFAULT_SSH_PORT=22
@@ -53,28 +53,40 @@ prompt_yes_no() {
 
 validate_password() {
     local p="$1"
-    [[ ${#p} -ge 12 ]] &&
-    [[ "$p" =~ [a-z] ]] &&
-    [[ "$p" =~ [A-Z] ]] &&
-    [[ "$p" =~ [0-9] ]] &&
+    [[ ${#p} -ge 12 ]] && \
+    [[ "$p" =~ [a-z] ]] && \
+    [[ "$p" =~ [A-Z] ]] && \
+    [[ "$p" =~ [0-9] ]] && \
     [[ "$p" =~ [^a-zA-Z0-9] ]]
 }
 
 validate_port() {
-    [[ "$1" =~ ^[0-9]+$ ]] &&
+    [[ "$1" =~ ^[0-9]+$ ]] && \
     (( "$1" >= MIN_SSH_PORT && "$1" <= MAX_SSH_PORT ))
 }
 
 safe_sudoers() {
-    chmod 440 "/etc/sudoers.d/$1"
-    visudo -cf "/etc/sudoers.d/$1"
+    local file="/etc/sudoers.d/$1"
+    chmod 440 "$file"
+    # Перехватываем ошибку visudo при включенном set -e
+    if ! visudo -cf "$file"; then
+        echo "Ошибка: некорректный синтаксис sudoers! Удаляем поврежденный файл: $file"
+        rm -f "$file"
+        return 1
+    fi
 }
 
 restart_ssh() {
+    # Специфика Ubuntu 24.04: переключаемся с socket-activation на классический сервис
+    if systemctl is-active --quiet ssh.socket; then
+        echo "Переключаем SSH с socket-activation на classic service (Ubuntu 24.04)..."
+        systemctl stop ssh.socket
+        systemctl disable ssh.socket
+        systemctl enable ssh.service
+    fi
     systemctl restart ssh || systemctl restart sshd
 }
 
-# Функция настройки SSH ключей
 setup_ssh_keys() {
     local target_user="$1"
     local user_home
@@ -96,27 +108,21 @@ setup_ssh_keys() {
 
     case "$choice" in
         1)
-            # Генерация ключей
             mkdir -p "$user_home/.ssh"
             chmod 700 "$user_home/.ssh"
-
-            # Удаляем старый ключ, если есть, чтобы не спрашивал перезапись
             rm -f "$user_home/.ssh/id_ed25519" "$user_home/.ssh/id_ed25519.pub"
 
             echo "Генерируем ключи Ed25519..."
             ssh-keygen -t ed25519 -f "$user_home/.ssh/id_ed25519" -C "vps-$target_user" -N "" -q
 
-            # Добавляем в authorized_keys
             cat "$user_home/.ssh/id_ed25519.pub" >> "$user_home/.ssh/authorized_keys"
-
-            # Права
             chmod 600 "$user_home/.ssh/authorized_keys"
             chown -R "$target_user":"$target_user" "$user_home/.ssh" 2>/dev/null || chown -R "$target_user" "$user_home/.ssh"
 
             echo ""
             echo "==========================================================="
             echo "!!! СОХРАНИТЕ ЭТОТ ПРИВАТНЫЙ КЛЮЧ ПРЯМО СЕЙЧАС !!!"
-            echo "Скопируйте всё между линиями и сохраните в файл (например: myserver.key)"
+            echo "Скопируйте всё между линиями и сохраните в файл"
             echo "==========================================================="
             cat "$user_home/.ssh/id_ed25519"
             echo "==========================================================="
@@ -125,7 +131,6 @@ setup_ssh_keys() {
             return 0
             ;;
         2)
-            # Вставка ключа
             echo "Вставьте ваш публичный ключ (начинается с ssh-rsa или ssh-ed25519):"
             read -r pub_key
 
@@ -155,9 +160,11 @@ setup_ssh_keys() {
 # СЕТЕВЫЕ НАСТРОЙКИ (BBR + IPv6)
 #####################################
 if prompt_yes_no "Включить TCP BBR и отключить IPv6"; then
-    # BBR
-    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
-        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    # BBR (проверка по факту наличия параметра bbr)
+    if ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+        if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
+            echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+        fi
         echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
         echo "TCP BBR добавлен в конфиг."
     fi
@@ -170,7 +177,7 @@ if prompt_yes_no "Включить TCP BBR и отключить IPv6"; then
         echo "IPv6 отключен в конфиге."
     fi
 
-    sysctl -p
+    sysctl --system || sysctl -p || true
     echo "Сетевые настройки применены."
 fi
 
@@ -182,7 +189,7 @@ if prompt_yes_no "Сменить пароль root"; then
         read -rsp "Новый пароль root: " rp; echo
         read -rsp "Повтор: " rp2; echo
         [[ "$rp" == "$rp2" ]] || { echo "Пароли не совпадают"; continue; }
-        validate_password "$rp" || { echo "Слабый пароль"; continue; }
+        validate_password "$rp" || { echo "Слабый пароль! Требуется: >=12 симв., заглавные, строчные, цифры и спецсимвол."; continue; }
         echo "root:$rp" | chpasswd
         break
     done
@@ -199,12 +206,13 @@ if prompt_yes_no "Создать обычного пользователя"; the
         echo "Пользователь уже существует"
         CREATED_USER="$uname"
     else
-        adduser --disabled-password --gecos "" "$uname"
         while true; do
             read -rsp "Пароль для $uname: " up; echo
             read -rsp "Повтор: " up2; echo
-            [[ "$up" == "$up2" ]] || continue
-            validate_password "$up" || continue
+            [[ "$up" == "$up2" ]] || { echo "Пароли не совпадают"; continue; }
+            validate_password "$up" || { echo "Слабый пароль! Требуется: >=12 симв., заглавные, строчные, цифры и спецсимвол."; continue; }
+            
+            adduser --disabled-password --gecos "" "$uname"
             echo "$uname:$up" | chpasswd
             break
         done
@@ -224,14 +232,12 @@ fi
 KEYS_INSTALLED=false
 
 if [ -n "$CREATED_USER" ]; then
-    # Если создали юзера, предлагаем ключи для него
     if prompt_yes_no "Настроить SSH ключи для пользователя $CREATED_USER"; then
         if setup_ssh_keys "$CREATED_USER"; then
             KEYS_INSTALLED=true
         fi
     fi
 else
-    # Если юзера не создавали, предлагаем для root
     if prompt_yes_no "Настроить SSH ключи для ROOT"; then
         if setup_ssh_keys "root"; then
             KEYS_INSTALLED=true
@@ -258,15 +264,13 @@ if prompt_yes_no "Изменить порт SSH"; then
     echo "AddressFamily inet" >> /etc/ssh/sshd_config
 fi
 
-
-# Отключение входа по паролю (Только если ключи были установлены)
-if $KEYS_INSTALLED; then
+if [ "$KEYS_INSTALLED" = true ]; then
     if prompt_yes_no "Отключить вход по паролю (PasswordAuthentication no)?"; then
         sed -i '/^#\?PasswordAuthentication /d' /etc/ssh/sshd_config
         echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
 
-        sed -i '/^#\?ChallengeResponseAuthentication /d' /etc/ssh/sshd_config
-        echo "ChallengeResponseAuthentication no" >> /etc/ssh/sshd_config
+        sed -i '/^#\?KbdInteractiveAuthentication /d' /etc/ssh/sshd_config
+        echo "KbdInteractiveAuthentication no" >> /etc/ssh/sshd_config
 
         sed -i '/^#\?UsePAM /d' /etc/ssh/sshd_config
         echo "UsePAM no" >> /etc/ssh/sshd_config
@@ -275,10 +279,10 @@ if $KEYS_INSTALLED; then
     fi
 fi
 
-# Убедимся, что PubkeyAuthentication включен
 sed -i '/^#\?PubkeyAuthentication /d' /etc/ssh/sshd_config
 echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
 
+# Перезапускаем службу (с учетом специфики 24.04)
 restart_ssh
 
 #####################################
@@ -291,29 +295,35 @@ sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw
 ufw default deny incoming
 ufw default allow outgoing
 
+# Блокировка Ping (ICMP) через замену правила по умолчанию в UFW
+if [ -f /etc/ufw/before.rules ]; then
+    echo "Настройка блокировки ICMP (ping)..."
+    sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
+fi
+
 echo "Настраиваем порты (только IPv4)..."
 
-# Разрешаем SSH-порт на внешнем интерфейсе
-ufw allow proto tcp from any to 0.0.0.0/0 port "$SSH_PORT" comment 'SSH'
+# Корректный синтаксис для UFW под кастомный порт
+ufw allow "$SSH_PORT"/tcp comment 'SSH'
 
-# Разрешаем веб-трафик и Certbot (TCP)
+# Разрешаем веб-трафик (TCP)
 TCP_PORTS=(80 443 8443)
 for port in "${TCP_PORTS[@]}"; do
-    ufw allow proto tcp from any to 0.0.0.0/0 port "$port"
+    ufw allow "$port"/tcp
 done
 
 # Разрешаем UDP-трафик для Hysteria 2 / TUIC напрямую
 UDP_PORTS=(443 8443)
 for port in "${UDP_PORTS[@]}"; do
-    ufw allow proto udp from any to 0.0.0.0/0 port "$port"
+    ufw allow "$port"/udp
 done
 
 ufw --force enable
 
 #####################################
-# FAIL2BAN
+# FAIL2BAN (С установкой python3-systemd)
 #####################################
-apt install -y fail2ban
+apt install -y fail2ban python3-systemd
 
 cat > /etc/fail2ban/jail.local <<EOF
 [sshd]
@@ -329,15 +339,17 @@ systemctl enable fail2ban
 systemctl restart fail2ban
 
 #####################################
-# 3X-UI !!!ВАЖНО - в конце установки выбираем вариант "БЕЗ SSL (обратный прокси на 127.0.0.1) пункт 4 и 'N'!!!
+# 3X-UI
 #####################################
-if prompt_yes_no "Установить 3x-ui)"; then
-    # Проверяем, установлен ли curl, если нет - ставим временно
+if prompt_yes_no "Установить 3x-ui"; then
     if ! command -v curl &> /dev/null; then
         apt install -y curl
     fi
     echo "Запуск установки 3x-ui"
+    # Полностью снимаем strict mode для беспрепятственного выполнения интерактивного внешнего установщика
+    set +euo pipefail
     bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    set -euo pipefail
 fi
 
 #####################################
@@ -348,12 +360,21 @@ echo "======================================"
 echo "✔ PROD НАСТРОЙКА ЗАВЕРШЕНА"
 echo "SSH порт: $SSH_PORT"
 echo "IPv6: отключён (System + UFW)"
-echo "UFW: включён (только v4 правила)"
+echo "UFW: включён (только v4 правила, входящий Ping заблокирован)"
 echo "BBR: активирован"
-echo "Fail2ban: активен"
-if $KEYS_INSTALLED; then
+echo "Fail2ban: активен (backend: systemd)"
+if [ "$KEYS_INSTALLED" = true ]; then
     echo "SSH Ключи: УСТАНОВЛЕНЫ"
 else
     echo "SSH Ключи: НЕ установлены"
 fi
+echo "======================================"
+echo "ВАЖНО: Пожалуйста, НЕ закрывайте текущую сессию терминала!"
+echo "Откройте новое окно терминала на вашем компьютере и попробуйте подключиться:"
+if [ -n "$CREATED_USER" ]; then
+    echo "  ssh -p $SSH_PORT $CREATED_USER@<IP_ВАШЕГО_СЕРВЕРА>"
+else
+    echo "  ssh -p $SSH_PORT root@<IP_ВАШЕГО_СЕРВЕРА>"
+fi
+echo "Убедитесь, что доступ по новому порту успешно работает, прежде чем завершить текущую сессию."
 echo "======================================"
