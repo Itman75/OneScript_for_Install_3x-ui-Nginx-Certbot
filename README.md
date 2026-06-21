@@ -51,7 +51,7 @@ graph TD
 ### Шаг 1: Подготовка сервера, обновление и установка 3X-UI
 Запустите скрипт обновления системы, установки утилит и hardening-настройки ОС на чистом сервере:
 ```bash
-wget https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/secure-vps.sh)
+wget https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/secure-vps.sh
 chmod +x secure-vps.sh
 ./secure-vps.sh
 ```
