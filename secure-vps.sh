@@ -6,7 +6,7 @@ set -euo pipefail
 #  + BBR + Disable IPv6 + Block Ping
 #  + IPv4 ONLY Firewall Rules
 #  + SSH Keys (Auto-gen or Paste)
-#  + 3x-ui v2.9.4
+#  + 3x-ui
 #  + Extended Utilities
 #####################################
 
@@ -331,13 +331,13 @@ systemctl restart fail2ban
 #####################################
 # 3X-UI 
 #####################################
-if prompt_yes_no "Установить 3x-ui (версия v2.9.4)"; then
+if prompt_yes_no "Установить 3x-ui)"; then
     # Проверяем, установлен ли curl, если нет - ставим временно
     if ! command -v curl &> /dev/null; then
         apt install -y curl
     fi
     echo "Запуск установки 3x-ui"
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v2.9.4
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 fi
 
 #####################################
