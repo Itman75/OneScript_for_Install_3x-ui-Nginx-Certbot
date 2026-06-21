@@ -115,17 +115,17 @@ bash <(curl -Ls https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router
       "xver": 1,
       "target": "127.0.0.1:9443",
       "serverNames": [
-        "cdn1.host74.ru"
+        "your.realityalt.domain"
       ],
-      "privateKey": "aFtINYEuoXw7txer7oW-QM-Fee84XVsJNEAjwB3voHc",
+      "privateKey": "blablabla",
       "minClientVer": "",
       "maxClientVer": "",
       "maxTimediff": 0,
       "shortIds": [
-        "d090f8e0d8c9afbd"
+        "blablabla"
       ],
       "settings": {
-        "publicKey": "jcBLJ515WkgBG9_KG9_xsRRi090juihbHQpvP7tHJFg",
+        "publicKey": "blablabla",
         "fingerprint": "chrome",
         "spiderX": "/"
       }
@@ -133,7 +133,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router
     "externalProxy": [
       {
         "forceTls": "same",
-        "dest": "cdn1.host74.ru",
+        "dest": "your.realityalt.domain",
         "port": 443
       }
     ]
@@ -173,13 +173,13 @@ bash <(curl -Ls https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router
     },
     "security": "tls",
     "tlsSettings": {
-      "serverName": "nod.host74.ru",
+      "serverName": "your.primary.domain",
       "minVersion": "1.3",
       "maxVersion": "1.3",
       "certificates": [
         {
-          "certificateFile": "/etc/letsencrypt/live/nod.host74.ru/fullchain.pem",
-          "keyFile": "/etc/letsencrypt/live/nod.host74.ru/privkey.pem",
+          "certificateFile": "/etc/letsencrypt/live/your.primary.domain/fullchain.pem",
+          "keyFile": "/etc/letsencrypt/live/your.primary.domain/privkey.pem",
           "usage": "encipherment",
           "useFile": true
         }
