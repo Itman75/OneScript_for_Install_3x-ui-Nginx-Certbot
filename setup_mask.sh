@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 #
-# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Fork v1.0.3-Universal)
+# Production AutoSetup from ItMan75 (Hardened & Multi-Domain Cosmos-Only Ultimate v1.0.9-Clean)
 # Highly Configurable Nginx Stream L4 Router & Mask for 3X-UI from ItMan75
+# Supported external ports: 443 (TCP) and 8443 (TCP) simultaneously
+# Fully interactive domain-to-port mapping logic
 #
 
 set -euo pipefail
 
 # ─────────────────────────── Цвета ───────────────────────────
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
+GREEN='\033;0;32m'
+CYAN='\033;0;36m'
+RED='\033;0;31m'
+YELLOW='\033;1;33m'
 NC='\033[0m'
 
 log()  { echo -e "${CYAN}[+]${NC} $*"; }
@@ -21,7 +23,7 @@ die()  { echo -e "${RED}[✗] $*${NC}" >&2; exit 1; }
 trap 'die "Скрипт аварийно прерван на строке $LINENO"' ERR
 
 echo -e "${CYAN}=========================================================${NC}"
-echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.0.3 (Production Setup)${NC}"
+echo -e "${GREEN}  Nginx L4 Stream Router & Mask v1.0.9 (Ultimate Clean)  ${NC}"
 echo -e "${CYAN}=========================================================${NC}"
 
 # ─────────────────────── Предусловия ─────────────────────────
@@ -68,17 +70,50 @@ prompt_default() {
 #  ИНТЕРАКТИВНЫЙ ВВОД ПАРАМЕТРОВ С ВЫБОРОМ
 # ═════════════════════════════════════════════════════════════
 echo
-echo -e "${YELLOW}Шаг 1: Доменные имена${NC}"
-echo -e "Укажите все домены через ПРОБЕЛ. Первый домен — основной (декой + панель)."
-read -rp "Введите домены: " -a DOMAINS
-
-if [ ${#DOMAINS[@]} -eq 0 ]; then
-    die "Список доменов не может быть пустым."
-fi
-
-PRIMARY_DOMAIN="${DOMAINS[0]}"
+echo -e "${YELLOW}Шаг 1: Основной домен (для маскировки, панели и подписок)${NC}"
+read -rp "Введите основной домен (например, www.host74.ru): " PRIMARY_DOMAIN
 [[ "$PRIMARY_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]] \
     || die "Некорректный формат главного домена: $PRIMARY_DOMAIN"
+
+DOMAINS=("$PRIMARY_DOMAIN")
+REALITY_PORTS=("") # Плейсхолдер для основного домена (у него нет Reality-порта)
+
+echo
+echo -e "${YELLOW}Шаг 1.2: Альтернативные домены и привязка портов Reality${NC}"
+echo -e "Введите ваши домены для Reality по очереди. Для каждого домена вы укажете внутренний порт."
+echo -e "Чтобы завершить ввод доменов, просто нажмите Enter на пустой строке."
+echo
+
+while true; do
+    read -rp "Введите альтернативный домен (или Enter для завершения): " ALT_DOMAIN
+    if [ -z "$ALT_DOMAIN" ]; then
+        break
+    fi
+    
+    # Валидация домена
+    if [[ ! "$ALT_DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+        warn "Некорректный формат домена. Попробуйте еще раз."
+        continue
+    fi
+    
+    read -rp "Укажите внутренний порт Reality для $ALT_DOMAIN [45443]: " ALT_PORT
+    ALT_PORT="${ALT_PORT:-45443}"
+    
+    # Валидация порта
+    if [[ ! "$ALT_PORT" =~ ^[0-9]+$ ]] || [ "$ALT_PORT" -le 0 ] || [ "$ALT_PORT" -gt 65535 ]; then
+        warn "Некорректный порт. Будет назначен порт по умолчанию: 45443."
+        ALT_PORT="45443"
+    fi
+    
+    DOMAINS+=("$ALT_DOMAIN")
+    REALITY_PORTS+=("$ALT_PORT")
+    ok "Добавлено: $ALT_DOMAIN будет перенаправлен на порт $ALT_PORT"
+    echo
+done
+
+if [ ${#DOMAINS[@]} -eq 1 ]; then
+    die "Вы должны добавить хотя бы один альтернативный домен для Reality!"
+fi
 
 echo
 echo -e "${YELLOW}Шаг 2: Настройка портов и путей панели 3X-UI${NC}"
@@ -86,7 +121,7 @@ prompt_default "Внутренний порт вашей веб-панели 3X-
 prompt_default "Секретный путь к веб-панели (например, /dashboard/)" "/dashboard/" RAW_PATH
 PANEL_PATH=$(echo "/${RAW_PATH}/" | tr -s '/')
 
-# ДОБАВЛЕНО ДЛЯ ИСПРАВЛЕНИЯ ПОДПИСОК: Выделенный внутренний порт подписок
+# Выделенный внутренний порт подписок
 prompt_default "Выделенный внутренний порт подписок 3X-UI" "55443" SUB_PORT
 
 # Валидация портов панели и подписок
@@ -101,26 +136,9 @@ if [ "$PANEL_PORT" -eq "$SUB_PORT" ]; then
 fi
 
 echo
-echo -e "${YELLOW}Шаг 3: Настройка инбаундов VLESS Reality${NC}"
-echo -e "Укажите внутренние порты REALITY через ПРОБЕЛ (например: 54320 54321 54322)."
-echo -e "Каждому альтернативному домену будет назначен свой порт по порядку."
-read -rp "Введите порты Reality [54320]: " -a REALITY_PORTS
-
-if [ ${#REALITY_PORTS[@]} -eq 0 ]; then
-    REALITY_PORTS=("54320")
-fi
-
-# Валидация портов Reality
-for port in "${REALITY_PORTS[@]}"; do
-    if [[ ! "$port" =~ ^[0-9]+$ ]] || [ "$port" -le 0 ] || [ "$port" -gt 65535 ]; then
-        die "Некорректный порт Reality: $port. Порт должен быть числом от 1 до 65535."
-    fi
-done
-
-echo
 echo -e "${GREEN}[i] ОПЦИЯ АКТИВНА — HYSTERIA 2 (UDP):${NC}"
-echo -e "    Входной порт ${CYAN}443/UDP${NC} автоматически зарезервирован под прямой биндинг в Xray."
-echo -e "    Nginx не будет обрабатывать этот UDP-трафик, что гарантирует максимальную скорость и минимальный пинг"
+echo -e "    Входные порты ${CYAN}443/UDP${NC} и ${CYAN}8443/UDP${NC} автоматически доступны для прямого биндинга в Xray."
+echo -e "    Nginx не будет обрабатывать этот UDP-трафик, гарантируя максимальную скорость."
 
 echo
 echo -e "${YELLOW}Шаг 4: Выбор шаблона маскировки (Decoy)${NC}"
@@ -352,11 +370,20 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
 </html>
 EOF
 
-    # Скачивание оригинального логотипа Cosmos Cloud
+    # Скачивание оригинального логотипа Cosmos Cloud с резервным CDN-зеркалом
     log "Скачивание оригинального логотипа для заглушки Cosmos Cloud..."
-    curl -fsSL "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp" || warn "Не удалось скачать оригинальный логотип с GitHub."
+    if ! curl -fsSL --connect-timeout 10 "https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/logo.webp" -o "$WEBROOT/logo.webp"; then
+        warn "Прямой доступ к GitHub Raw ограничен. Пробуем скачать через зеркало CDN..."
+        if ! curl -fsSL --connect-timeout 10 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp"; then
+            warn "Пробуем скачать без проверки SSL (для старых ca-certificates)..."
+            curl -fsSLk --connect-timeout 10 "https://cdn.jsdelivr.net/gh/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui@main/logo.webp" -o "$WEBROOT/logo.webp" || warn "Не удалось скачать оригинальный логотип."
+        fi
+    fi
+
     if [ -f "$WEBROOT/logo.webp" ]; then
-        chown nginx:nginx "$WEBROOT/logo.webp"
+        chown "$NGINX_USER:$NGINX_USER" "$WEBROOT/logo.webp"
+        chmod 644 "$WEBROOT/logo.webp"
+        ok "Логотип успешно загружен."
     fi
 
 else
@@ -380,7 +407,8 @@ else
 </html>
 EOF
 fi
-chown nginx:nginx "$WEBROOT/index.html"
+chown "$NGINX_USER:$NGINX_USER" "$WEBROOT/index.html"
+chmod 644 "$WEBROOT/index.html"
 
 # ═════════════════════════════════════════════════════════════
 # 10. НАСТРОЙКА NGINX CONFIGS (STREAM + HTTP)
@@ -429,20 +457,15 @@ EOF
 
 log "Сборка конфигурации L4 Stream..."
 STREAM_MAP_RULES=""
-REALITY_UPSTREAMS=""
-NUM_PORTS=${#REALITY_PORTS[@]}
+ALL_REALITY_PORTS=()
 
 for ((i=1; i<${#DOMAINS[@]}; i++)); do
-  PORT_INDEX=$((i - 1))
-  if [ "$PORT_INDEX" -lt "$NUM_PORTS" ]; then
-     CURRENT_PORT="${REALITY_PORTS[$PORT_INDEX]}"
-  else
-     CURRENT_PORT="${REALITY_PORTS[0]}"
-  fi
-  STREAM_MAP_RULES+="    ${DOMAINS[$i]}      reality_backend_$CURRENT_PORT;\n"
+    STREAM_MAP_RULES+="    ${DOMAINS[$i]}      reality_backend_${REALITY_PORTS[$i]};\n"
+    ALL_REALITY_PORTS+=("${REALITY_PORTS[$i]}")
 done
 
-UNIQUE_PORTS=($(echo "${REALITY_PORTS[@]}" | tr ' ' '\n' | awk '!x[$0]++'))
+UNIQUE_PORTS=($(echo "${ALL_REALITY_PORTS[@]}" | tr ' ' '\n' | awk '!x[$0]++'))
+REALITY_UPSTREAMS=""
 for port in "${UNIQUE_PORTS[@]}"; do
   REALITY_UPSTREAMS+="
 upstream reality_backend_$port {
@@ -473,6 +496,7 @@ server {
 
 server {
     listen 443;
+    listen 8443; # Поддержка внешнего порта 8443
     ssl_preread on;
     proxy_pass \$backend_gate;
     proxy_connect_timeout 5s;
@@ -487,12 +511,12 @@ if [ "$DECOY_TEMPLATE" = "1" ]; then
   COSMOS_MOCK_API='
     location ~ ^/(api/v1/status|status)$ {
         default_type application/json;
-        return 200 "{\"installed\":true,\"maintenance\":false,\"version\":\"0.22.18\",\"productname\":\"CosmosCloud\"}\n";
+        return 200 '\''{"installed":true,"maintenance":false,"version":"0.22.18","productname":"CosmosCloud"}'\'';
     }
     location = /api/v1/auth/login {
         if ($request_method = POST) {
             add_header Set-Cookie "cosmos_session=$request_id; path=/; Secure; HttpOnly; SameSite=Lax" always;
-            return 200 "{\"status\":\"OK\",\"message\":\"Authenticated\"}\n";
+            return 200 '\''{"status":"OK","message":"Authenticated"}'\'';
         }
         return 405;
     }'
@@ -515,6 +539,7 @@ server {
 
 server {
     listen 127.0.0.1:9443 ssl proxy_protocol;
+    listen 127.0.0.1:9444 ssl;
     http2 on;
     server_name $NGINX_SERVER_NAMES;
 
@@ -551,7 +576,6 @@ server {
         proxy_intercept_errors off;
     }
 
-    # ИЗМЕНЕНО ДЛЯ ИСПРАВЛЕНИЯ ПОДПИСОК: Перенаправляем строго на внутренний SUB_PORT подписок
     location ^~ /postkey/ {
         proxy_pass http://127.0.0.1:$SUB_PORT;
         proxy_set_header Host \$http_host;
@@ -567,6 +591,8 @@ server {
     $COSMOS_MOCK_API
 
     location = / {
+        default_type text/html;
+        root $WEBROOT;
         try_files /index.html =404;
     }
 
@@ -597,7 +623,7 @@ systemctl restart nginx
 FORMATTED_PORTS=$(echo "${UNIQUE_PORTS[@]}" | sed 's/ /, /g')
 
 # ═════════════════════════════════════════════════════════════
-#  ФИНАЛЬНЫЙ ВЫВОД (ПОЛНОСТЬЮ СОХРАНЕННАЯ СТАРАЯ ИНСТРУКЦИЯ)
+#  ФИНАЛЬНЫЙ ВЫВОД
 # ═════════════════════════════════════════════════════════════
 echo
 echo -e "${GREEN}=========================================================${NC}"
@@ -609,28 +635,29 @@ echo -e "Вход в панель 3X-UI:  ${CYAN}https://${PRIMARY_DOMAIN}${PANE
 echo -e "SSL Сертификаты:      ${GREEN}/etc/letsencrypt/live/${PRIMARY_DOMAIN}/${NC}"
 echo
 echo -e "${YELLOW}ВАЖНО: ВЫ ДОЛЖНЫ ВРУЧНУЮ НАСТРОИТЬ ВАШ ФАЙЕРВОЛ:${NC}"
-echo -e "Разрешите входящие порты:   ${GREEN}80/TCP, 443/TCP, 443/UDP, [Ваш кастомный порт SSH]${NC}"
+echo -e "Разрешите входящие порты:   ${GREEN}80/TCP, 443/TCP, 8443/TCP, 443/UDP, [Ваш кастомный порт SSH]${NC}"
 echo -e "Заблокируйте для внешних:   ${RED}$PANEL_PORT (Панель 3X-UI), $FORMATTED_PORTS (Reality порты)${NC}"
 echo
 echo -e "${YELLOW}ФИНАЛЬНЫЙ ШАГ: НАСТРОЙТЕ ИНБАУНДЫ В ПАНЕЛИ 3X-UI:${NC}"
 echo -e "1. Настройка инбаундов ${GREEN}VLESS REALITY${NC}:"
-echo -e "   - Создайте инбаунды под каждый порт: ${GREEN}$FORMATTED_PORTS${NC}"
-echo -e "   - Для каждого инбаунда обязательно установите ${CYAN}Listen IP (IP)${NC} в значение ${GREEN}127.0.0.1${NC}."
-echo -e "   - В клиентах при подключении используйте соответствующий домен (SNI), порт всегда ставьте ${GREEN}443${NC}."
+for ((i=1; i<${#DOMAINS[@]}; i++)); do
+    echo -e "   - Создайте инбаунд под домен ${CYAN}${DOMAINS[$i]}${NC} на внутренний порт: ${GREEN}${REALITY_PORTS[$i]}${NC}"
+    echo -e "     (Для этого инбаунда установите ${CYAN}Listen IP${NC} в значение ${GREEN}127.0.0.1${NC} и пропишите ${CYAN}serverNames: ${DOMAINS[$i]}${NC})"
+done
 echo
 echo -e "2. Настройка инбаунда ${GREEN}Hysteria 2${NC}:"
 echo -e "   - Порт: ${GREEN}443${NC}, Listen IP: ${GREEN}0.0.0.0${NC} (Протокол: ${CYAN}UDP${NC})."
 echo -e "   - Пути к сертификатам: ${CYAN}/etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem${NC} / ${CYAN}privkey.pem${NC}"
 echo
-echo -e "3. Настройка системы подписок (Subscriptions) в 3X-UI (ОБНОВЛЕНО С ДОПОМ):"
-echo -e "   - Перейдите в веб-интерфейс панели -> ${CYAN}Настройки панели${NC} -> вкладка ${CYAN}Настройки подписок${NC} (или просто 'Подписка')."
+echo -e "3. Настройка системы подписок (Subscriptions) в 3X-UI:"
+echo -e "   - Перейдите в веб-интерфейс панели -> ${CYAN}Настройки панели${NC} -> вкладка ${CYAN}Настройки подписок${NC}."
 echo -e "   - Нажмите галочку ${GREEN}Включить подписку (Enable Subscription)${NC}."
 echo -e "   - В поле ${CYAN}Порт подписки (Subscription port)${NC} впишите выделенный порт: ${GREEN}$SUB_PORT${NC}."
 echo -e "   - В поле ${CYAN}URI-путь подписки (Subscription path)${NC} строго укажите: ${GREEN}/postkey/${NC}."
 echo -e "   - В поле ${CYAN}URI обратного прокси пропишите адрес подписки без портов:"
-echo -e "     ${GREEN}https://${PRIMARY_DOMAIN}/postkey/"
+echo -e "     ${GREEN}https://${PRIMARY_DOMAIN}:8443/postkey/${NC} или ${GREEN}https://${PRIMARY_DOMAIN}/postkey/${NC}."
 echo -e "   - Нажмите ${YELLOW}Сохранить настройки${NC} и обязательно нажмите ${CYAN}Перезапустить панель${NC}."
-echo -e "   - ${CYAN}Важно:${NC} Теперь все запросы клиентов будут идти на стандартный безопасный порт 443, а Nginx сам передаст их панели."
+echo -e "   - ${CYAN}Важно:${NC} Теперь все запросы клиентов будут идти на стандартный безопасный порт 443 или 8443, а Nginx сам передаст их панели."
 echo
 
 exit 0
