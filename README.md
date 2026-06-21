@@ -51,14 +51,18 @@ graph TD
 ### Шаг 1: Подготовка сервера, обновление и установка 3X-UI
 Запустите скрипт обновления системы, установки утилит и hardening-настройки ОС на чистом сервере:
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/secure-vps.sh)
+wget https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/secure-vps.sh)
+chmod +x secure-vps.sh
+./secure-vps.sh
 ```
 > **Что будет сделано:** Полное обновление ОС (`apt update && apt upgrade`), установка утилит администрирования (`htop`, `btop`, `iperf3`, `tcpdump`...), включение BBR, отключение IPv6, создание безопасного sudo-пользователя, импорт или генерация SSH-ключей Ed25519, изменение порта SSH, отключение парольного входа по SSH, настройка UFW, установка Fail2ban и развертывание чистой панели 3X-UI
 
 ### Шаг 2: Установка L4-роутера и маскировки Nginx
 Запустите интерактивный скрипт маршрутизации:
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/setup_mask.sh)
+wget https://raw.githubusercontent.com/Itman75/Nginx-L4-Stream-Router-Mask-for-3x-ui/main/setup_mask.sh
+chmod +x setup_mask.sh
+./setup_mask.sh
 ```
 > **Что будет сделано:** Подключение официального репозитория Nginx, установка Certbot, выпуск SAN-сертификата Let's Encrypt для всех доменов, генерация веб-интерфейса CosmosCloud, настройка конфигурации Stream и HTTP серверов Nginx с интеграцией PROXY-протокола.
 
