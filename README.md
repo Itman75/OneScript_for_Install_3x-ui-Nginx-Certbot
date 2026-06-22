@@ -84,12 +84,12 @@ chmod +x setup_mask.sh
 * **Порт (Port):** Укажите локальный порт, назначенный скриптом на Шаге 1.2 (например, `45443`).
 * **IP для прослушивания (Listen IP):** Строго впишите `127.0.0.1` (это скроет Reality от внешнего сканирования).
 * **Поток (Stream) -> Транспорт:** `TCP` (или `RAW`).
-* **Proxy Protocol:** Выключен (`false`). *Nginx пересылает сырой TCP на Reality-порт.*
+* **Proxy Protocol:** Включен (`true`). 
 * **Безопасность (Security):** `Reality`.
 * **Xver (Proxy Protocol к декою):** `1` (PROXY protocol v1).
-* **Цель (Dest):** `127.0.0.1:9443` (или `127.0.0.1:9444`, если не хотите логировать внешние IP на заглушке).
+* **Цель (Dest):** `127.0.0.1:9443`.
 
-#### Эталонная конфигурация инбаунда VLESS Reality (JSON):
+#### Пример конфига inbound VLESS Reality (JSON):
 ```json
 {
   "listen": "127.0.0.1",
@@ -105,10 +105,11 @@ chmod +x setup_mask.sh
     ],
     "decryption": "none"
   },
+  {
   "streamSettings": {
     "network": "tcp",
     "tcpSettings": {
-      "acceptProxyProtocol": false,
+      "acceptProxyProtocol": true,
       "header": {
         "type": "none"
       }
@@ -165,17 +166,31 @@ chmod +x setup_mask.sh
   "settings": {
     "clients": [
       {
-        "auth": "ваш_пароль_авторизации"
+        bla
       }
-    ]
+    ],
+    "version": 2
+  },
+  "sniffing": {
+    "enabled": false
   },
   "streamSettings": {
     "network": "hysteria",
     "hysteriaSettings": {
       "version": 2,
-      "udpIdleTimeout": 60
+      "udpIdleTimeout": 60,
+      "masquerade": {
+        "type": "proxy",
+        "dir": "",
+        "url": "http://127.0.0.1:80",
+        "rewriteHost": false,
+        "insecure": false,
+        "content": "",
+        "headers": {},
+        "statusCode": 0
+      }
     },
-    "security": "tls",
+     "security": "tls",
     "tlsSettings": {
       "serverName": "your.primary.domain",
       "minVersion": "1.3",
